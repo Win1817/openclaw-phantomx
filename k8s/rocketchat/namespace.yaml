@@ -1,0 +1,55 @@
+---
+# Namespace for all OpenClaw × Rocket.Chat components
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+    app.kubernetes.io/component: platform
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+
+---
+# ServiceAccount — least-privilege identity for the gateway pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: gateway
+automountServiceAccountToken: false
+
+---
+# Role — only what the gateway actually needs
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+subjects:
+  - kind: ServiceAccount
+    name: openclaw-gateway
+    namespace: openclaw
+roleRef:
+  kind: Role
+  name: openclaw-gateway
+  apiGroup: rbac.authorization.k8s.io

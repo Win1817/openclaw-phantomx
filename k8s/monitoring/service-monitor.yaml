@@ -1,0 +1,237 @@
+---
+# ServiceMonitor: tells Prometheus Operator to scrape the gateway /metrics endpoint.
+# Requires: prometheus-operator (kube-prometheus-stack Helm chart)
+#
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    # Match the Prometheus Operator's serviceMonitorSelector labels
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack   # change to match your Prometheus release name
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-gateway
+      app.kubernetes.io/component: gateway
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: false
+  namespaceSelector:
+    matchNames:
+      - openclaw
+
+---
+# ServiceMonitor for Redis exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: event-bus
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+  namespaceSelector:
+    matchNames:
+      - openclaw
+
+---
+# ServiceMonitor for NATS exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nats-exporter
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+      app.kubernetes.io/component: event-bus
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+  namespaceSelector:
+    matchNames:
+      - openclaw
+
+---
+# PrometheusRule: alerting rules for OpenClaw × Rocket.Chat
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openclaw-rocketchat-alerts
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # -----------------------------------------------------------------------
+    # Gateway health
+    # -----------------------------------------------------------------------
+    - name: openclaw.gateway
+      interval: 30s
+      rules:
+        - alert: OpenClawGatewayDown
+          expr: up{job="openclaw-gateway"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "OpenClaw gateway is down"
+            description: "{{ $labels.pod }} has been unreachable for > 1m"
+
+        - alert: OpenClawGatewayHighErrorRate
+          expr: |
+            rate(openclaw_http_requests_total{status=~"5.."}[5m])
+            / rate(openclaw_http_requests_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "OpenClaw gateway error rate > 5%"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5m"
+
+        - alert: OpenClawGatewayHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(openclaw_http_request_duration_seconds_bucket[5m])
+            ) > 5
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "OpenClaw gateway p99 latency > 5s"
+            description: "p99 latency is {{ $value | humanizeDuration }}"
+
+    # -----------------------------------------------------------------------
+    # Rocket.Chat DDP connection
+    # -----------------------------------------------------------------------
+    - name: openclaw.rocketchat
+      interval: 30s
+      rules:
+        - alert: RocketChatDDPDisconnected
+          expr: openclaw_rocketchat_ddp_connected == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Rocket.Chat DDP connection lost"
+            description: "Account {{ $labels.account_id }} has been disconnected for > 2m"
+
+        - alert: RocketChatInboundQueueBacklog
+          expr: redis_stream_length{stream="openclaw.rocketchat.inbound"} > 500
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Rocket.Chat inbound message queue is backing up"
+            description: "Queue depth is {{ $value }} — consider scaling gateway replicas"
+
+        - alert: RocketChatDLQMessages
+          expr: redis_stream_length{stream="openclaw.rocketchat.inbound.dlq"} > 0
+          for: 1m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Messages in Rocket.Chat dead-letter queue"
+            description: "{{ $value }} messages failed all retry attempts"
+
+        - alert: RocketChatPromptInjectionBlocked
+          expr: |
+            rate(openclaw_rocketchat_inbound_dropped_total{reason="prompt_injection"}[5m]) > 1
+          for: 2m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Elevated prompt-injection block rate on Rocket.Chat"
+            description: "{{ $value }} blocks/s — potential attack in progress"
+
+    # -----------------------------------------------------------------------
+    # Redis event bus
+    # -----------------------------------------------------------------------
+    - name: openclaw.redis
+      interval: 30s
+      rules:
+        - alert: RedisDown
+          expr: redis_up == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Redis event bus is down"
+            description: "Redis instance in namespace {{ $labels.namespace }} is unreachable"
+
+        - alert: RedisHighMemoryUsage
+          expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Redis memory usage > 85%"
+            description: "{{ $value | humanizePercentage }} used — risk of OOM / eviction"
+
+        - alert: RedisSlowlogGrowing
+          expr: increase(redis_slowlog_length[5m]) > 20
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Redis slow query log growing rapidly"
+            description: "{{ $value }} slow queries in last 5m"
+
+    # -----------------------------------------------------------------------
+    # HPA scaling
+    # -----------------------------------------------------------------------
+    - name: openclaw.scaling
+      interval: 60s
+      rules:
+        - alert: OpenClawGatewayAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{
+              namespace="openclaw",
+              horizontalpodautoscaler="openclaw-gateway"
+            }
+            >= kube_horizontalpodautoscaler_spec_max_replicas{
+              namespace="openclaw",
+              horizontalpodautoscaler="openclaw-gateway"
+            }
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "OpenClaw gateway HPA at maximum replicas"
+            description: "Running at {{ $value }} replicas (max). Increase maxReplicas or scale underlying nodes."

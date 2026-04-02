@@ -1,0 +1,200 @@
+---
+# NetworkPolicy: default-deny all ingress/egress within the openclaw namespace,
+# then selectively allow only what each component actually needs.
+#
+# Threat model addressed:
+#   - Compromised Rocket.Chat plugin cannot reach other namespaces
+#   - Agent sandbox pods cannot exfiltrate secrets via lateral movement
+#   - Redis only accepts connections from gateway pods
+#   - Metrics scraping allowed only from monitoring namespace
+#
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}   # Applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow gateway pods to receive HTTP from ingress controller
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-gateway
+  namespace: openclaw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    # From ingress-nginx in any namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 3000
+          protocol: TCP
+    # From Prometheus in monitoring namespace (metrics scrape)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9090
+          protocol: TCP
+    # Pod-to-pod within openclaw namespace (headless service DNS)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openclaw
+      ports:
+        - port: 3000
+          protocol: TCP
+
+---
+# Allow gateway pods to reach Rocket.Chat (external), Redis, DNS, AI APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-egress
+  namespace: openclaw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-gateway
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution (kube-dns)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+        - podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+    # Redis event bus (within openclaw namespace)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+
+    # NATS JetStream (within openclaw namespace, if deployed)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - port: 4222
+          protocol: TCP
+
+    # Rocket.Chat server (HTTPS + WSS) — external traffic
+    # Adjust CIDR if your Rocket.Chat is internal
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8      # Block RFC1918
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+
+    # AI provider APIs (Anthropic, OpenAI) — HTTPS only
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+
+---
+# Redis: only accept connections from gateway pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-from-gateway
+  namespace: openclaw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw-gateway
+      ports:
+        - port: 6379
+          protocol: TCP
+    # Allow Redis Sentinel / cluster inter-node traffic
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+        - port: 16379
+          protocol: TCP
+
+---
+# NATS: only accept from gateway pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nats-from-gateway
+  namespace: openclaw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw-gateway
+      ports:
+        - port: 4222
+          protocol: TCP
+    # NATS clustering / leafnode
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - port: 6222
+          protocol: TCP
+        - port: 8222
+          protocol: TCP

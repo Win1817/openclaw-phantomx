@@ -1,0 +1,75 @@
+---
+# ConfigMap: non-secret gateway configuration.
+# Secrets (auth tokens, user IDs) are in rocketchat-secrets.yaml
+# and mounted as env vars — never baked into this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-gateway-config
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: config
+  annotations:
+    # Bump this annotation to trigger a rolling restart when config changes
+    config/version: "1"
+data:
+  # -----------------------------------------------------------------------
+  # OpenClaw gateway settings
+  # -----------------------------------------------------------------------
+  OPENCLAW_LOG_LEVEL: "info"
+  OPENCLAW_LOG_FORMAT: "json"
+
+  # Gateway HTTP port (internal — exposed via Service, not NodePort)
+  OPENCLAW_GATEWAY_PORT: "3000"
+
+  # -----------------------------------------------------------------------
+  # Rocket.Chat channel settings (non-sensitive)
+  # -----------------------------------------------------------------------
+  # Full URL to the Rocket.Chat server
+  ROCKETCHAT_SERVER_URL: "https://chat.example.com"
+
+  # Bot username (for mention detection; auto-resolved if unset)
+  ROCKETCHAT_BOT_USERNAME: "openclaw-bot"
+
+  # Chat mode: oncall | onmessage | onchar
+  ROCKETCHAT_CHATMODE: "oncall"
+
+  # Threading: off | first | all
+  ROCKETCHAT_REPLY_TO: "first"
+
+  # DM policy: pairing | allowlist | open | disabled
+  ROCKETCHAT_DM_POLICY: "pairing"
+
+  # Group/channel policy: open | allowlist | disabled
+  ROCKETCHAT_GROUP_POLICY: "open"
+
+  # Outbound text chunk limit (chars)
+  ROCKETCHAT_TEXT_CHUNK_LIMIT: "4000"
+
+  # Prompt injection guard (true/false)
+  ROCKETCHAT_PROMPT_INJECTION_GUARD: "true"
+
+  # Max inbound message length before dropping
+  ROCKETCHAT_MAX_INBOUND_MSG_LEN: "8000"
+
+  # -----------------------------------------------------------------------
+  # Event bus (Redis Streams)
+  # -----------------------------------------------------------------------
+  ROCKETCHAT_EVENT_BUS_TRANSPORT: "redis"
+  ROCKETCHAT_EVENT_BUS_STREAM_PREFIX: "openclaw.rocketchat"
+  ROCKETCHAT_EVENT_BUS_MAX_RETRIES: "3"
+  ROCKETCHAT_EVENT_BUS_RETRY_BACKOFF_MS: "1000"
+
+  # -----------------------------------------------------------------------
+  # DDP / WebSocket connection tuning
+  # -----------------------------------------------------------------------
+  ROCKETCHAT_RECONNECT_DELAY_MS: "2000"
+  ROCKETCHAT_MAX_RECONNECT_ATTEMPTS: "10"
+  ROCKETCHAT_PING_INTERVAL_MS: "30000"
+  ROCKETCHAT_REST_TIMEOUT_MS: "15000"
+
+  # -----------------------------------------------------------------------
+  # Slash commands callback path
+  # -----------------------------------------------------------------------
+  ROCKETCHAT_SLASH_CALLBACK_PATH: "/rocketchat/slash/default"

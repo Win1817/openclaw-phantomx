@@ -1,0 +1,48 @@
+---
+# ClusterIP Service — internal access for Ingress + other pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: gateway
+  annotations:
+    # For AWS NLB / GCP NEG integration if using external ingress
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+
+---
+# Headless service for direct pod-to-pod DDP connections (optional)
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-gateway-headless
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

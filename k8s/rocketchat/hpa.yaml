@@ -1,0 +1,96 @@
+---
+# HorizontalPodAutoscaler: scale gateway pods based on CPU, memory,
+# and custom Prometheus metrics (inbound message queue depth).
+#
+# Prerequisites:
+#   - metrics-server installed (for CPU/memory)
+#   - prometheus-adapter installed (for custom metrics)
+#   - KEDA (optional alternative for event-driven scaling on Redis queue depth)
+#
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: autoscaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: openclaw-gateway
+
+  # Hard floor keeps at least 2 pods for HA across AZs
+  minReplicas: 2
+  # Scale up to 10 for large Rocket.Chat workspaces
+  maxReplicas: 10
+
+  metrics:
+    # --- CPU: scale out when average pod CPU > 60% -----------------------
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
+    # --- Memory: scale out at 70% (gateway keeps session state in mem) ---
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # --- Custom: Redis inbound queue depth (messages waiting) -----------
+    # Requires prometheus-adapter with the rule:
+    #   metricsQuery: 'sum(redis_stream_length{stream="openclaw.rocketchat.inbound"})'
+    - type: Pods
+      pods:
+        metric:
+          name: rocketchat_inbound_queue_depth
+        target:
+          type: AverageValue
+          averageValue: "50"
+
+  behavior:
+    scaleUp:
+      # Aggressive scale-up: add up to 3 pods per 30s window
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 30
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      # Conservative scale-down: wait 5 minutes, remove 1 pod at a time
+      # Prevents flapping during bursty chat traffic
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min
+
+---
+# PodDisruptionBudget: ensure at least 1 pod is always available during
+# node drains, cluster upgrades, and voluntary disruptions.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-gateway
+      app.kubernetes.io/component: gateway

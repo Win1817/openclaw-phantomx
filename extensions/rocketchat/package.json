@@ -1,0 +1,42 @@
+{
+  "name": "@openclaw/rocketchat",
+  "version": "2026.4.1",
+  "description": "OpenClaw Rocket.Chat channel plugin — production-grade, event-driven, multi-agent",
+  "type": "module",
+  "dependencies": {
+    "@sinclair/typebox": "0.34.49",
+    "ws": "^8.20.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.4.1"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "channel": {
+      "id": "rocketchat",
+      "label": "Rocket.Chat",
+      "selectionLabel": "Rocket.Chat (plugin)",
+      "docsPath": "/channels/rocketchat",
+      "docsLabel": "rocketchat",
+      "blurb": "self-hosted team chat; real-time DDP + REST API, multi-agent orchestration, slash commands.",
+      "order": 64
+    },
+    "install": {
+      "npmSpec": "@openclaw/rocketchat",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.1"
+    }
+  }
+}

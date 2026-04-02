@@ -1,0 +1,63 @@
+---
+# Ingress: exposes the OpenClaw gateway for:
+#   - Rocket.Chat slash-command callbacks  (/rocketchat/slash/*)
+#   - Outgoing webhook callbacks
+#   - External agent API (if enabled)
+#
+# Prerequisites: ingress-nginx controller installed
+# TLS: cert-manager with Let's Encrypt (replace secretName / annotations)
+#
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openclaw-gateway
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw-gateway
+    app.kubernetes.io/component: ingress
+  annotations:
+    # nginx
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"    # WebSocket keepalive
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+
+    # TLS via cert-manager
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # Rate limiting: 60 req/min per IP on slash-command endpoint
+    nginx.ingress.kubernetes.io/limit-rpm: "60"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - openclaw.example.com        # ← change to your domain
+      secretName: openclaw-tls
+  rules:
+    - host: openclaw.example.com      # ← change to your domain
+      http:
+        paths:
+          # Slash-command callback (POST from Rocket.Chat)
+          - path: /rocketchat/slash(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: openclaw-gateway
+                port:
+                  name: http
+          # Health endpoints (public)
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: openclaw-gateway
+                port:
+                  name: http
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: openclaw-gateway
+                port:
+                  name: http

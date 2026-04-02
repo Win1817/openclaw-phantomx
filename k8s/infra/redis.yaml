@@ -1,0 +1,237 @@
+---
+# Redis StatefulSet: persistent event bus for OpenClaw × Rocket.Chat.
+#
+# Configuration:
+#   - Single-master with appendonly AOF persistence
+#   - AUTH password from Secret
+#   - 8 GiB PVC for stream data
+#   - Liveness via PING, Readiness via INFO check
+#
+# For production HA: replace with redis-ha Helm chart or Redis Operator
+# (Bitnami redis with sentinel mode, or Redis Enterprise Operator).
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: config
+data:
+  redis.conf: |
+    # Persistence
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+
+    # Streams: keep up to 1M entries per stream before trimming
+    # (individual XADD calls should use MAXLEN ~ for bounded streams)
+
+    # Memory policy: noeviction so we never silently drop stream messages
+    maxmemory-policy noeviction
+
+    # Connection limits
+    maxclients 1000
+    timeout 300
+    tcp-keepalive 60
+
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 256
+
+    # Disable dangerous commands
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+    rename-command CONFIG ""
+    rename-command DEBUG ""
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: event-bus
+spec:
+  serviceName: redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: event-bus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: event-bus
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      serviceAccountName: openclaw-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - redis-server
+            - /etc/redis/redis.conf
+            - --requirepass
+            - $(REDIS_PASSWORD)
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Redis needs to write AOF
+            capabilities:
+              drop: ["ALL"]
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "4Gi"
+
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+                  optional: true
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: redis-config
+              mountPath: /etc/redis
+              readOnly: true
+
+        # Prometheus Redis exporter sidecar
+        - name: redis-exporter
+          image: oliver006/redis_exporter:v1.58.0-alpine
+          ports:
+            - name: metrics
+              containerPort: 9121
+              protocol: TCP
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: REDIS_PASSWORD
+                  optional: true
+            - name: REDIS_ADDR
+              value: "redis://localhost:6379"
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app.kubernetes.io/name: redis
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 8Gi
+        # Use fast SSD storage class in production
+        # storageClassName: fast-ssd
+
+---
+# Headless service for StatefulSet DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: event-bus
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: event-bus
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+
+---
+# Named service for gateway connection string
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-master
+  namespace: openclaw
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: event-bus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: event-bus
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+    - name: metrics
+      port: 9121
+      targetPort: metrics
