@@ -430,7 +430,7 @@ run_profile() {
   PROOF_VALUE="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')"
   echo -n "$PROOF_VALUE" >"$PROOF_TXT"
   write_png_lr_rg "$IMAGE_PNG"
-  EXPECTED_HOSTNAME="$(cat /etc/hostname | tr -d '\r\n')"
+  EXPECTED_HOSTNAME="$(tr -d '\r\n' < /etc/hostname)"
 
   echo "==> Start gateway ($profile)"
   GATEWAY_LOG="$workspace/gateway.log"
@@ -477,7 +477,7 @@ run_profile() {
   assert_agent_json_has_text "$TURN2_JSON"
   assert_agent_json_ok "$TURN2_JSON" "$agent_model_provider"
   local copy_value
-  copy_value="$(cat "$PROOF_COPY" 2>/dev/null | tr -d '\r\n' || true)"
+  copy_value="$(tr -d '\r\n' < "$PROOF_COPY" 2>/dev/null || true)"
   if [[ "$copy_value" != "$PROOF_VALUE" ]]; then
     echo "ERROR: copy.txt did not match proof.txt ($profile)" >&2
     exit 1
@@ -494,7 +494,7 @@ run_profile() {
   run_agent_turn "$profile" "$SESSION_ID" "$prompt3" "$TURN3_JSON"
   assert_agent_json_has_text "$TURN3_JSON"
   assert_agent_json_ok "$TURN3_JSON" "$agent_model_provider"
-  if [[ "$(cat "$HOSTNAME_TXT" 2>/dev/null | tr -d '\r\n' || true)" != "$EXPECTED_HOSTNAME" ]]; then
+  if [[ "$(tr -d '\r\n' < "$HOSTNAME_TXT" 2>/dev/null || true)" != "$EXPECTED_HOSTNAME" ]]; then
     echo "ERROR: hostname.txt did not match /etc/hostname ($profile)" >&2
     exit 1
   fi

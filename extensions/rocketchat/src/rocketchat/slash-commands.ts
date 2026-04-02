@@ -21,7 +21,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getRocketChatRuntime } from "../runtime.js";
 import { resolveRocketChatAccount } from "./accounts.js";
-import { sendMessageRocketChat } from "./send.ts";
+import { sendMessageRocketChat } from "./send.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 import { createChannelReplyPipeline } from "./runtime-api.js";
 

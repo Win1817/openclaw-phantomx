@@ -23,7 +23,7 @@ import {
 } from "./accounts.js";
 import { RocketChatClient } from "./client.js";
 import { DDPClient, type RocketChatMessage } from "./ddp-client.js";
-import { sendMessageRocketChat, sendRocketChatTyping } from "./send.ts";
+import { sendMessageRocketChat, sendRocketChatTyping } from "./send.js";
 import { runInboundSecurityGate, checkSenderAllowed } from "./security.js";
 import type {
   ChannelAccountSnapshot,

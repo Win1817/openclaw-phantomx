@@ -40,7 +40,7 @@ import {
 } from "./rocketchat/accounts.js";
 import { monitorRocketChatProvider } from "./rocketchat/monitor.js";
 import { probeRocketChat } from "./rocketchat/probe.js";
-import { reactToRocketChatMessage, sendMessageRocketChat } from "./rocketchat/send.ts";
+import { reactToRocketChatMessage, sendMessageRocketChat } from "./rocketchat/send.js";
 import {
   formatRocketChatAllowEntry,
   looksLikeRocketChatId,

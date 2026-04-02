@@ -7,7 +7,7 @@
  */
 
 import { getRocketChatRuntime } from "../runtime.js";
-import { resolveRocketChatAccount } from "./accounts.ts";
+import { resolveRocketChatAccount } from "./accounts.js";
 import { RocketChatClient, type RCAttachment, type RCSendResult } from "./client.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 
